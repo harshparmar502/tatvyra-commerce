@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
+    "shopify:sync": "node --env-file=.env.local scripts/shopify-sync-products.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

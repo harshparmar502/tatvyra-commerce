@@ -57,6 +57,12 @@ export default function OrderConfirmation() {
           </p>
 
           <dl className="confirm__facts">
+            {order.shopifyOrder?.name && (
+              <div>
+                <dt>Order number</dt>
+                <dd className="confirm__reference">{order.shopifyOrder.name}</dd>
+              </div>
+            )}
             <div>
               <dt>Order reference</dt>
               <dd className="confirm__reference">{order.reference}</dd>
@@ -89,14 +95,30 @@ export default function OrderConfirmation() {
 
           <section className="confirm__block">
             <h2 className="checkout__subtitle">What happens next</h2>
-            {/* No fulfilment system is connected, so this says what is actually
-                true rather than promising a dispatch email that nothing sends. */}
-            <p className="confirm__note">
-              This store is a prototype: the payment step is a demonstration and no live provider is
-              connected yet, so nothing has been charged and no dispatch is scheduled. Quote{' '}
-              <strong>{order.reference}</strong> if you get in touch at{' '}
-              <a href={`mailto:${BRAND.contact.emails[0]}`}>{BRAND.contact.emails[0]}</a>.
-            </p>
+            {/* Orders saved before the live gateway have no isDemo flag; they
+                were all demo orders. */}
+            {order.isDemo !== false ? (
+              <p className="confirm__note">
+                This order was placed in demo mode: no live payment provider was used, so nothing
+                has been charged and no dispatch is scheduled. Quote{' '}
+                <strong>{order.reference}</strong> if you get in touch at{' '}
+                <a href={`mailto:${BRAND.contact.emails[0]}`}>{BRAND.contact.emails[0]}</a>.
+              </p>
+            ) : (
+              <p className="confirm__note">
+                We are packing your order now. Once it is handed to the courier you can follow it
+                from your order status page
+                {order.shopifyOrder?.statusPageUrl ? (
+                  <>
+                    {' '}
+                    — <a href={order.shopifyOrder.statusPageUrl}>view order status</a>
+                  </>
+                ) : null}
+                . Questions? Write to{' '}
+                <a href={`mailto:${BRAND.contact.emails[0]}`}>{BRAND.contact.emails[0]}</a> and quote{' '}
+                <strong>{order.shopifyOrder?.name ?? order.reference}</strong>.
+              </p>
+            )}
           </section>
 
           <div className="checkout__actions">

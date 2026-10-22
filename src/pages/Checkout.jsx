@@ -7,25 +7,30 @@ import { useCart } from '../context/useCart'
 import { getDraft, saveDraft } from '../lib/checkoutDraft'
 import { toOrderLines } from '../lib/cartLines'
 import usePageMeta from '../lib/usePageMeta'
+import { DELIVERY_RULES as RULES, EMPTY_DELIVERY as EMPTY, validateDelivery } from '../lib/deliveryDetails'
 
-/** Field name -> validator. Returns a message, or null when the value is fine. */
-const RULES = {
-  name: (v) => (v.trim().length >= 2 ? null : 'Enter the name for the delivery.'),
-  email: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()) ? null : 'Enter a valid email address.'),
-  phone: (v) => (v.replace(/\D/g, '').length === 10 ? null : 'Enter a 10-digit mobile number.'),
-  address: (v) => (v.trim().length >= 6 ? null : 'Enter the street address.'),
-  city: (v) => (v.trim().length >= 2 ? null : 'Enter the town or city.'),
-  state: (v) => (v.trim().length >= 2 ? null : 'Enter the state.'),
-  pin: (v) => (/^\d{6}$/.test(v.trim()) ? null : 'Enter a 6-digit PIN code.'),
+/**
+ * Asks Shiprocket (through /api) whether the PIN code is deliverable.
+ * Returns { serviceable, etaDays } — or null when the check itself could not
+ * run (not configured, offline), in which case checkout carries on rather than
+ * blocking a sale on a lookup.
+ */
+async function checkPin(pin) {
+  try {
+    const res = await fetch(`/api/shipping/check?pin=${encodeURIComponent(pin)}`)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
 }
-
-const EMPTY = { name: '', email: '', phone: '', address: '', address2: '', city: '', state: '', pin: '' }
 
 export default function Checkout() {
   const navigate = useNavigate()
   const { items, subtotal, delivery, total } = useCart()
   const [values, setValues] = useState(() => ({ ...EMPTY, ...(getDraft() ?? {}) }))
   const [errors, setErrors] = useState({})
+  const [checking, setChecking] = useState(false)
 
   usePageMeta({
     title: 'Checkout — Tatvyra',
@@ -39,19 +44,26 @@ export default function Checkout() {
     setErrors((prev) => (prev[field] && !RULES[field]?.(value) ? { ...prev, [field]: null } : prev))
   }
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault()
-    const found = {}
-    for (const [field, rule] of Object.entries(RULES)) {
-      const message = rule(values[field] ?? '')
-      if (message) found[field] = message
-    }
+    if (checking) return
+    const found = validateDelivery(values)
     setErrors(found)
     if (Object.keys(found).length > 0) {
       document.querySelector(`[aria-invalid="true"]`)?.focus()
       return
     }
-    saveDraft(values)
+
+    setChecking(true)
+    const shipping = await checkPin(values.pin.trim())
+    setChecking(false)
+    if (shipping && shipping.serviceable === false) {
+      setErrors({ pin: 'Sorry, we cannot deliver to this PIN code yet.' })
+      document.getElementById('co-pin')?.focus()
+      return
+    }
+
+    saveDraft({ ...values, etaDays: shipping?.etaDays ?? null })
     navigate('/checkout/payment')
   }
 
@@ -124,7 +136,9 @@ export default function Checkout() {
           {field('pin', 'PIN code', { inputMode: 'numeric', autoComplete: 'postal-code', half: true })}
 
           <div className="checkout__actions">
-            <Button type="submit" variant="primary">Continue to payment</Button>
+            <Button type="submit" variant="primary" disabled={checking}>
+              {checking ? 'Checking delivery…' : 'Continue to payment'}
+            </Button>
             <Link to="/shop" className="checkout__back">Keep shopping</Link>
           </div>
         </form>

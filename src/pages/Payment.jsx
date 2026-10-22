@@ -17,7 +17,7 @@ export default function Payment() {
   const gateway = useMemo(() => getPaymentGateway(), [])
   const draft = useMemo(() => getDraft(), [])
 
-  const [methodId, setMethodId] = useState(gateway.methods[0].id)
+  const [methodId, setMethodId] = useState(gateway.methods[0]?.id ?? null)
   const [values, setValues] = useState({})
   const [errors, setErrors] = useState({})
   const [status, setStatus] = useState(PaymentStatus.Idle)
@@ -32,13 +32,22 @@ export default function Payment() {
      stays the same order rather than becoming a second one. */
   const [reference] = useState(makeReference)
 
+  /* The server's priced totals, once a live provider has quoted them. Until
+     then the page shows the cart's own figures. */
+  const [quote, setQuote] = useState(null)
+
   usePageMeta({
     title: 'Payment — Tatvyra',
     description: 'Pay for your Tatvyra order.',
   })
 
-  const method = gateway.methods.find((m) => m.id === methodId) ?? gateway.methods[0]
+  const method = gateway.methods.find((m) => m.id === methodId) ?? gateway.methods[0] ?? null
+  /* A provider with no methods (Razorpay) collects details in its own window. */
+  const hosted = method === null
   const busy = status === PaymentStatus.Processing
+  const shown = quote ?? { lines: toOrderLines(items), subtotal, delivery, total }
+  /* Money has moved but the order is not confirmed yet: never offer a retry. */
+  const awaitingConfirmation = failure?.code === 'confirm_pending'
 
   if (items.length === 0 && !placed) return <Navigate to="/shop" replace />
   if (!draft) return <Navigate to="/checkout" replace />
@@ -58,7 +67,7 @@ export default function Payment() {
 
   const validate = () => {
     const found = {}
-    for (const f of method.fields) {
+    for (const f of method?.fields ?? []) {
       const message = f.validate?.(values[f.name] ?? '')
       if (message) found[f.name] = message
     }
@@ -77,12 +86,15 @@ export default function Payment() {
     let result
     try {
       result = await gateway.pay({
-        amount: total,
+        amount: shown.total,
         currency: 'INR',
-        method: method.id,
+        method: method?.id ?? null,
         fields: values,
         reference,
+        lines: items.map(({ slug, size, quantity }) => ({ slug, size, quantity })),
+        customer: draft,
         onStage: setStage,
+        onQuote: setQuote,
       })
     } catch {
       /* A provider that throws is still a failed payment as far as the
@@ -97,16 +109,20 @@ export default function Payment() {
     if (result.status === PaymentStatus.Succeeded) {
       setPlaced(true)
       setStatus(PaymentStatus.Succeeded)
+      const paid = result.totals ?? shown
       const order = saveOrder({
         reference,
         placedAt: new Date().toISOString(),
-        lines: toOrderLines(items),
-        subtotal,
-        delivery,
-        total,
+        lines: paid.lines,
+        subtotal: paid.subtotal,
+        delivery: paid.delivery,
+        total: paid.total,
         /* The method label only — no card, UPI or bank detail is stored. */
-        paymentMethod: method.label,
+        paymentMethod: result.methodLabel ?? method?.label ?? gateway.label,
         gateway: gateway.label,
+        isDemo: gateway.isDemo,
+        /* { name, statusPageUrl } of the Shopify order, when one was created. */
+        shopifyOrder: result.order ?? null,
         delivery_to: draft,
       })
       clearDraft()
@@ -145,6 +161,13 @@ export default function Payment() {
 
           <h2 className="checkout__subtitle">Payment method</h2>
 
+          {hosted ? (
+            <p className="pay__hosted">
+              Pay securely with Razorpay — UPI, cards, netbanking and wallets. A Razorpay window
+              opens when you press Pay; your card and UPI details go straight to Razorpay and never
+              touch this site.
+            </p>
+          ) : (
           <div className="pay__methods" role="radiogroup" aria-label="Payment method">
             {gateway.methods.map((m) => (
               <button
@@ -161,6 +184,7 @@ export default function Payment() {
               </button>
             ))}
           </div>
+          )}
 
           <form
             className="pay__fields"
@@ -170,6 +194,7 @@ export default function Payment() {
             }}
             noValidate
           >
+            {!hosted && (
             <fieldset disabled={busy}>
               <legend className="visually-hidden">{method.label} details</legend>
               <div className="pay__grid">
@@ -212,6 +237,7 @@ export default function Payment() {
                 ))}
               </div>
             </fieldset>
+            )}
 
             {/* Everything the customer is told about the attempt lives in this
                 one live region, so a screen reader hears each state change. */}
@@ -230,7 +256,13 @@ export default function Payment() {
 
               {status === PaymentStatus.Failed && failure && (
                 <div className="pay__failure">
-                  <p className="pay__failure-title">Payment not completed</p>
+                  <p className="pay__failure-title">
+                    {awaitingConfirmation
+                      ? 'Payment received — confirming your order'
+                      : failure.code === 'price_changed'
+                        ? 'Prices updated'
+                        : 'Payment not completed'}
+                  </p>
                   <p className="pay__failure-body">{failure.message}</p>
                 </div>
               )}
@@ -243,10 +275,10 @@ export default function Payment() {
               )}
             </div>
 
-            {status === PaymentStatus.Succeeded ? null : status === PaymentStatus.Failed ? (
+            {status === PaymentStatus.Succeeded || awaitingConfirmation ? null : status === PaymentStatus.Failed ? (
               <div className="checkout__actions">
                 <Button type="submit" variant="primary">
-                  Try again — {formatINR(total)}
+                  {failure?.code === 'price_changed' ? 'Pay' : 'Try again —'} {formatINR(shown.total)}
                 </Button>
                 <button
                   type="button"
@@ -256,13 +288,13 @@ export default function Payment() {
                     setFailure(null)
                   }}
                 >
-                  Use a different method
+                  {hosted ? 'Cancel' : 'Use a different method'}
                 </button>
               </div>
             ) : (
               <div className="checkout__actions">
                 <Button type="submit" variant="primary" disabled={busy}>
-                  {busy ? 'Processing…' : `Pay ${formatINR(total)}`}
+                  {busy ? 'Processing…' : `Pay ${formatINR(shown.total)}`}
                 </Button>
                 <Link to="/checkout" className="checkout__back">
                   Back to details
@@ -274,10 +306,10 @@ export default function Payment() {
 
         <div className="checkout__aside">
           <OrderSummary
-            lines={toOrderLines(items)}
-            subtotal={subtotal}
-            delivery={delivery}
-            total={total}
+            lines={shown.lines}
+            subtotal={shown.subtotal}
+            delivery={shown.delivery}
+            total={shown.total}
           />
           <section className="checkout__recap" aria-label="Delivery address">
             <h2 className="osum__title">Delivering to</h2>
@@ -291,6 +323,11 @@ export default function Payment() {
               <br />
               {draft.phone}
             </p>
+            {draft.etaDays ? (
+              <p className="checkout__recap-body">
+                Estimated delivery: {draft.etaDays} {draft.etaDays === 1 ? 'day' : 'days'} after dispatch.
+              </p>
+            ) : null}
             <Link to="/checkout" className="checkout__back">Edit</Link>
           </section>
         </div>

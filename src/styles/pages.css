@@ -2716,6 +2716,15 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.pay__hosted {
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid rgb(var(--ink-rgb) / 0.12);
+  border-radius: var(--radius-m);
+  font-size: var(--step--1);
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
 .pay__methods {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

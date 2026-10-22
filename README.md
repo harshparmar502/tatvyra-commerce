@@ -21,6 +21,11 @@ React 19 + React Router 7 on Vite 8, with hand-written CSS driven by design
 tokens. No UI kit, no CSS framework, no animation library — the only runtime
 dependencies are React, React DOM and React Router.
 
+Commerce: **Shopify** (products, stock, orders) + **Razorpay** (payments) +
+**Shiprocket** (delivery), joined by a few Vercel functions in `api/`. No SDKs —
+plain `fetch`. `npm run dev` serves the `api/` functions too. Setup, env vars
+and a test checklist: **[docs/COMMERCE-SETUP.md](docs/COMMERCE-SETUP.md)**.
+
 ## Layout
 
 ```

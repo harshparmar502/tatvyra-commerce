@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
 import { getProduct, priceFor } from '../data/catalogue'
+import { deliveryFor, FREE_DELIVERY_FROM } from '../lib/shipping'
 import { CartContext } from './useCart'
 
 /**
@@ -11,16 +12,10 @@ import { CartContext } from './useCart'
  *
  * Totals are computed here, once, and read by every surface — the arithmetic
  * lives in one place so the drawer and any later checkout cannot drift apart.
- * No payment backend is connected: the drawer totals the order and hands off to
- * the enquiry route rather than faking a payment step.
+ * These totals are for display while shopping. What is actually charged is
+ * priced again on the server from Shopify (api/_lib/checkout.js), using the
+ * same delivery rule from src/lib/shipping.js.
  */
-
-/* Placeholder delivery rule — free over a threshold, a flat fee below it.
-   Unlike the product prices, which are Tatvyra's own MRPs, these two figures
-   are invented: the supplied price structure covers products only. Replace
-   them with the real rates, or drop the line, once shipping is settled. */
-const FREE_DELIVERY_FROM = 999
-const DELIVERY_FLAT = 79
 
 const STORAGE_KEY = 'tatvyra.cart.v1'
 
@@ -95,7 +90,7 @@ export function CartProvider({ children }) {
       .filter(Boolean)
 
     const subtotal = items.reduce((sum, line) => sum + line.lineTotal, 0)
-    const delivery = subtotal > 0 && subtotal < FREE_DELIVERY_FROM ? DELIVERY_FLAT : 0
+    const delivery = deliveryFor(subtotal)
 
     return {
       items,
