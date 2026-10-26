@@ -1,44 +1,55 @@
 /**
  * Creates or updates the Tatvyra products in Shopify from src/data/catalogue.js.
  *
- *   node --env-file=.env.local scripts/shopify-sync-products.mjs           # dry run: prints the plan
- *   node --env-file=.env.local scripts/shopify-sync-products.mjs --apply   # writes to Shopify
+ *   npm run shopify:sync                          dry run: prints the plan, writes nothing
+ *   npm run shopify:sync -- --apply               create new products; update sizes, prices, SKUs
+ *   npm run shopify:sync -- --apply --content     ...and also (re)write descriptions, tags and SEO
  *
- * Needs Node 20.6+ and SHOPIFY_STORE_DOMAIN plus a token (see .env.example),
- * with the write_products scope.
+ * Needs Node 20.6+, SHOPIFY_STORE_DOMAIN and a token (see .env.example) with
+ * the write_products scope.
  *
- * For each product it sets: title, handle (= the site slug), one "Size" option,
- * and one variant per size with
- *   price            the site's selling price (priceFor)
- *   compare-at price the MRP shown struck through (mrpFor)
- *   SKU              variantSku() — what the checkout looks variants up by
- *   weight           parsed from sizes like "250g"; set the rest in Shopify
+ * Always kept in step with the website, on every --apply:
+ *   title, handle (= the site slug), vendor, type, one "Size" option, and per size:
+ *   price (priceFor), compare-at price (mrpFor), SKU (variantSku — the checkout
+ *   finds products by it) and weight (parsed from sizes like "250g").
  *
- * The description is only written when the product is first created, so edits
- * made in the Shopify admin are not overwritten. Stock levels are never
- * touched: set them in Shopify, or the checkout will report items as out of
- * stock.
+ * Content — description (descriptor + benefits + "Why moringa/spirulina"),
+ * tags and SEO — is written when a product is created, and afterwards only
+ * with --content, so edits made in the Shopify admin are not overwritten by
+ * accident.
+ *
+ * Images are uploaded from the live site (SITE_URL, default
+ * https://www.tatvyra.com) only when the Shopify product has no images yet,
+ * so re-running never duplicates them.
+ *
+ * Stock levels are never touched: set them in Shopify.
  */
-import { CATEGORIES, mrpFor, priceFor, PRODUCTS } from '../src/data/catalogue.js'
+import { benefitsFor, CATEGORIES, mrpFor, priceFor, PRODUCTS } from '../src/data/catalogue.js'
 import { variantSku } from '../src/lib/variantSku.js'
 import { assertNoUserErrors, shopify } from '../api/_lib/shopify.js'
 
 const apply = process.argv.includes('--apply')
+const writeContent = process.argv.includes('--content')
+const SITE_URL = (process.env.SITE_URL || 'https://www.tatvyra.com').replace(/\/$/, '')
 
 const FIND = /* GraphQL */ `
   query Find($query: String!) {
-    products(first: 1, query: $query) { nodes { id handle } }
+    products(first: 1, query: $query) {
+      nodes { id handle mediaCount { count } }
+    }
   }
 `
 
 const SET = /* GraphQL */ `
   mutation Sync($input: ProductSetInput!) {
     productSet(input: $input, synchronous: true) {
-      product { id handle }
+      product { id handle mediaCount { count } }
       userErrors { field message }
     }
   }
 `
+
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 const grams = (size) => {
   const match = /^(\d+(?:\.\d+)?)\s*g\b/i.exec(size)
@@ -46,6 +57,30 @@ const grams = (size) => {
 }
 
 const money = (n) => (n === null ? null : n.toFixed(2))
+
+function descriptionFor(product, category) {
+  const parts = [`<p>${esc(product.descriptor ?? '')}</p>`]
+  const { items } = benefitsFor(product)
+  if (items.length) {
+    parts.push('<h3>Key benefits</h3>', `<ul>${items.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`)
+  }
+  if (category?.highlights) {
+    parts.push(
+      `<h3>${esc(category.highlights.title)}</h3>`,
+      `<ul>${category.highlights.points.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>`,
+    )
+  }
+  return parts.join('')
+}
+
+function imagesFor(product) {
+  const list = product.images?.length ? product.images : product.image ? [{ src: product.image, alt: product.name }] : []
+  return list.map((img) => ({
+    originalSource: `${SITE_URL}${img.src}`,
+    alt: img.alt ?? product.name,
+    contentType: 'IMAGE',
+  }))
+}
 
 function variantsFor(product) {
   return product.sizes.map((size) => {
@@ -69,12 +104,20 @@ function variantsFor(product) {
 let failures = 0
 
 for (const product of PRODUCTS) {
+  const category = CATEGORIES.find((c) => c.slug === product.category)
   const existing = (await shopify(FIND, { query: `handle:${product.slug}` })).products.nodes.find(
     (p) => p.handle === product.slug,
   )
   const variants = variantsFor(product)
+  const images = imagesFor(product)
+  const withContent = !existing || writeContent
+  const withImages = !existing || existing.mediaCount.count === 0
 
-  console.log(`${existing ? 'update' : 'create'}  ${product.name}`)
+  const notes = [
+    withContent ? 'content' : null,
+    withImages && images.length ? `${images.length} image(s)` : null,
+  ].filter(Boolean)
+  console.log(`${existing ? 'update' : 'create'}  ${product.name}${notes.length ? `  (+ ${notes.join(', ')})` : ''}`)
   for (const v of variants) {
     console.log(
       `        ${v.inventoryItem.sku.padEnd(18)} ${v.optionValues[0].name.padEnd(18)} ₹${v.price}  (MRP ₹${v.compareAtPrice})`,
@@ -87,11 +130,18 @@ for (const product of PRODUCTS) {
     title: product.name,
     handle: product.slug,
     vendor: 'Tatvyra',
-    productType: CATEGORIES.find((c) => c.slug === product.category)?.name ?? '',
+    productType: category?.name ?? '',
     status: 'ACTIVE',
-    ...(existing ? {} : { descriptionHtml: `<p>${product.descriptor ?? ''}</p>` }),
     productOptions: [{ name: 'Size', values: product.sizes.map((name) => ({ name })) }],
     variants,
+    ...(withContent
+      ? {
+          descriptionHtml: descriptionFor(product, category),
+          tags: [category?.name, product.format, product.priceTbc ? 'price-to-confirm' : null].filter(Boolean),
+          seo: { title: `${product.name} | Tatvyra`, description: product.descriptor ?? '' },
+        }
+      : {}),
+    ...(withImages && images.length ? { files: images } : {}),
   }
 
   try {

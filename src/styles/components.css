@@ -914,6 +914,8 @@
 }
 
 .pcard__add:hover { background: var(--tatvyra-purple); color: var(--tatvyra-warm-white); }
+.pcard__add:disabled,
+.pcard__add:disabled:hover { background: transparent; color: var(--text-muted); border-color: currentColor; opacity: 0.6; cursor: not-allowed; }
 
 .pcard__view {
   font-size: var(--step--2);

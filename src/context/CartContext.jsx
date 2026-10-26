@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { getProduct, priceFor } from '../data/catalogue'
+import { getProduct } from '../data/catalogue'
 import { deliveryFor, FREE_DELIVERY_FROM } from '../lib/shipping'
+import { useLiveCatalogue } from '../lib/liveCatalogue'
 import { CartContext } from './useCart'
 
 /**
@@ -68,6 +69,8 @@ function readStoredLines() {
 export function CartProvider({ children }) {
   const [lines, dispatch] = useReducer(reducer, [], readStoredLines)
   const [isOpen, setIsOpen] = useState(false)
+  /* Shopify's live prices when available, the catalogue's otherwise. */
+  const { priceOf, snapshot: liveSnapshot } = useLiveCatalogue()
 
   useEffect(() => {
     try {
@@ -84,7 +87,7 @@ export function CartProvider({ children }) {
         if (!product) return null
         /* Fall back to nought rather than null, so one unpriced SKU cannot turn
            the whole basket into NaN. */
-        const unitPrice = priceFor(product, line.size) ?? 0
+        const unitPrice = priceOf(product, line.size) ?? 0
         return { ...line, product, unitPrice, lineTotal: unitPrice * line.quantity }
       })
       .filter(Boolean)
@@ -110,7 +113,9 @@ export function CartProvider({ children }) {
       removeItem: (id) => dispatch({ type: 'remove', id }),
       clearCart: () => dispatch({ type: 'clear' }),
     }
-  }, [lines, isOpen])
+    // priceOf is rebuilt every render; liveSnapshot is what actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, isOpen, liveSnapshot])
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
 }

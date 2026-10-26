@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom'
 import Button from './Button'
 import QuantitySelector from './QuantitySelector'
 import { MARKS } from '../data/brand'
-import { benefitsFor, STORE_DISCOUNT, mrpFor, priceFor } from '../data/catalogue'
+import { benefitsFor } from '../data/catalogue'
 import { formatINR } from '../lib/money'
+import { discountLabel, useLiveCatalogue } from '../lib/liveCatalogue'
 import { useCart } from '../context/useCart'
 
 /**
@@ -15,9 +16,13 @@ import { useCart } from '../context/useCart'
 export default function ProductInfo({ product, category }) {
   const [size, setSize] = useState(product.sizes[0])
   const [quantity, setQuantity] = useState(1)
-  const price = formatINR(priceFor(product, size))
-  const mrp = formatINR(mrpFor(product, size))
-  const off = `${Math.round(STORE_DISCOUNT * 100)}% off`
+  const { priceOf, mrpOf, inStock } = useLiveCatalogue()
+  const priceValue = priceOf(product, size)
+  const mrpValue = mrpOf(product, size)
+  const price = formatINR(priceValue)
+  const off = discountLabel(priceValue, mrpValue)
+  const mrp = off ? formatINR(mrpValue) : null
+  const available = inStock(product, size)
   const benefits = benefitsFor(product)
   const { addItem } = useCart()
 
@@ -42,11 +47,13 @@ export default function ProductInfo({ product, category }) {
           <>
             <p className="pinfo__price-now">
               <span className="pinfo__price-value">{price}</span>
-              <span className="pinfo__price-mrp">
-                <span className="visually-hidden">MRP </span>
-                <s>{mrp}</s>
-              </span>
-              <span className="pinfo__price-off">{off}</span>
+              {mrp && (
+                <span className="pinfo__price-mrp">
+                  <span className="visually-hidden">MRP </span>
+                  <s>{mrp}</s>
+                </span>
+              )}
+              {off && <span className="pinfo__price-off">{off}</span>}
             </p>
             {/* A pack the supplied price sheet does not carry: the figure is
                 ours, so the page says so rather than letting it read as MRP. */}
@@ -96,8 +103,9 @@ export default function ProductInfo({ product, category }) {
             variant="primary"
             full
             onClick={() => addItem(product.slug, size, quantity)}
+            disabled={!available}
           >
-            Add to cart
+            {available ? 'Add to cart' : 'Out of stock'}
           </Button>
         </div>
       </div>

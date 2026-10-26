@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getCategory, mrpFor, priceFor } from '../data/catalogue'
+import { getCategory } from '../data/catalogue'
 import { formatINR } from '../lib/money'
+import { useLiveCatalogue } from '../lib/liveCatalogue'
 import { useCart } from '../context/useCart'
 
 /**
@@ -9,17 +10,22 @@ import { useCart } from '../context/useCart'
  *
  * Deliberately spare: no ratings, no review counts, no invented badges. The
  * only chip shown is the product's format, which is printed in the catalogue.
- * The price follows the selected size chip and is read from the catalogue, so
- * the card, the product page and the cart cannot disagree. It is shown as a
- * pair: what the pack costs today, and the MRP it is struck from.
+ * The price follows the selected size chip and comes from Shopify when it is
+ * reachable (useLiveCatalogue), so the card, the product page and the cart
+ * cannot disagree. It is shown as a pair: what the pack costs today, and the
+ * MRP it is struck from.
  */
 export default function ProductCard({ product, priority = false }) {
   const category = getCategory(product.category)
   const [size, setSize] = useState(product.sizes[0])
   const { addItem } = useCart()
+  const { priceOf, mrpOf, inStock } = useLiveCatalogue()
   const hasSizeChoice = product.sizes.length > 1
-  const price = formatINR(priceFor(product, size))
-  const mrp = formatINR(mrpFor(product, size))
+  const priceValue = priceOf(product, size)
+  const mrpValue = mrpOf(product, size)
+  const price = formatINR(priceValue)
+  const mrp = mrpValue > priceValue ? formatINR(mrpValue) : null
+  const available = inStock(product, size)
 
   return (
     <article className="pcard">
@@ -66,10 +72,12 @@ export default function ProductCard({ product, priority = false }) {
             {price ? (
               <>
                 <span className="pcard__price-value">{price}</span>
-                <span className="pcard__price-mrp">
-                  <span className="visually-hidden">MRP </span>
-                  <s>{mrp}</s>
-                </span>
+                {mrp && (
+                  <span className="pcard__price-mrp">
+                    <span className="visually-hidden">MRP </span>
+                    <s>{mrp}</s>
+                  </span>
+                )}
               </>
             ) : (
               <span className="pcard__price-tbc">Price on request</span>
@@ -80,8 +88,9 @@ export default function ProductCard({ product, priority = false }) {
               type="button"
               className="pcard__add"
               onClick={() => addItem(product.slug, size)}
+              disabled={!available}
             >
-              Add to cart
+              {available ? 'Add to cart' : 'Out of stock'}
               <span className="visually-hidden"> — {product.name}, {size}</span>
             </button>
             <Link to={`/product/${product.slug}`} className="pcard__view">
