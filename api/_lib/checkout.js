@@ -229,7 +229,7 @@ const DRAFT_READ = /* GraphQL */ `
     draftOrder(id: $id) {
       id
       status
-      order { id name statusPageUrl }
+      order { id name }
     }
   }
 `
@@ -240,7 +240,7 @@ const DRAFT_COMPLETE = /* GraphQL */ `
       draftOrder {
         id
         status
-        order { id name statusPageUrl }
+        order { id name }
       }
       userErrors { field message }
     }
@@ -297,18 +297,21 @@ export async function completePaid({ razorpayOrderId, paymentId }) {
       if (!order) assertNoUserErrors(data.draftOrderComplete.userErrors, 'Completing the Shopify order')
     }
     if (!order) throw new HttpError(502, 'shopify_error', 'Shopify did not return the new order.')
+  }
 
-    try {
-      await shopify(TAGS_ADD, { id: order.id, tags: [`razorpay:${payment.id}`] })
-    } catch (error) {
-      console.error('[api] could not tag order with payment id', error)
-    }
+  // Label the order with its payment every time; adding a tag twice is harmless.
+  try {
+    await shopify(TAGS_ADD, { id: order.id, tags: [`razorpay:${payment.id}`] })
+  } catch (error) {
+    console.error('[api] could not tag order with payment id', error)
   }
 
   return {
     reference: rzOrder.notes?.reference ?? null,
     paymentId: payment.id,
     method: METHOD_LABELS[payment.method] ?? payment.method,
-    order: { name: order.name, statusPageUrl: order.statusPageUrl ?? null },
+    /* No status page link: Shopify only gives it to apps with customer-data
+       access, which the Basic plan does not allow. */
+    order: { name: order.name, statusPageUrl: null },
   }
 }
