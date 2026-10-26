@@ -7,8 +7,8 @@
  * website without a code change. Display only — the checkout prices the cart
  * again from Shopify itself (api/_lib/checkout.js).
  *
- * Cached at Vercel's edge for 60 seconds, so Shopify is asked at most about
- * once a minute however busy the site is.
+ * Cached at Vercel's edge for 20 seconds (then refreshed in the background), so
+ * an admin change shows within about a minute and Shopify is not asked on every visit.
  */
 import { route } from '../_lib/http.js'
 import { shopify } from '../_lib/shopify.js'
@@ -52,7 +52,7 @@ export const GET = route(async () => {
   return new Response(JSON.stringify({ variants, updatedAt: new Date().toISOString() }), {
     headers: {
       'content-type': 'application/json',
-      'cache-control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+      'cache-control': 'public, max-age=0, s-maxage=20, stale-while-revalidate=40',
     },
   })
 })
